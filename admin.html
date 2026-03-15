@@ -18,7 +18,7 @@
     table { width: 100%; border-collapse: collapse; background: #fff; margin-bottom: 2em; }
     th, td { border: 1px solid #ccc; padding: 0.4em; text-align: center; }
     th { background: #eee; }
-    input[type="text"] { width: 60px; text-align: center; }
+    input[type="text"] { width: 90px; text-align: center; }
     button { padding: 0.3em 0.6em; margin: 0.2em; cursor: pointer; }
     .action-buttons { display: flex; justify-content: center; gap: 0.5em; }
     #loginForm, #adminContent { display: none; }
@@ -41,20 +41,21 @@
     <div id="adminContent">
       <button onclick="logout()">Logout</button>
 
-      <div class="select-group">
-        <label for="sezione">Seleziona sezione:</label>
-        <select id="sezione" onchange="caricaPartite()">
-          <option value="programma">Fase a Gironi</option>
-          <option value="finali">Fase Finale</option>
-        </select>
-      </div>
-
-      <div class="select-group">
-        <label for="filtroTesto">Filtra partite (squadra, girone, data...):</label>
-        <input type="text" id="filtroTesto" oninput="caricaPartite()" placeholder="Es. BIRRA, G, 20.04.2026" />
-      </div>
-
-      <div id="tabellaPartite"></div>
+    <div class="select-group">
+      <label for="sezione">Seleziona sezione:</label>
+      <select id="sezione" onchange="caricaContenuto()">
+        <option value="gironi">Gironi</option>
+        <option value="programma">Fase a Gironi</option>
+        <option value="finali">Fase Finale</option>
+      </select>
+    </div>
+    
+    <div class="select-group">
+      <label for="filtroTesto" id="labelFiltro">Filtro:</label>
+      <input type="text" id="filtroTesto" oninput="caricaContenuto()" placeholder="Es. Squadra A1, A, 2026-04-04" />
+    </div>
+    
+    <div id="tabellaPartite"></div>
 
       <div class="select-group">
         <button onclick="resetRisultati()">Reset Tutti i Risultati</button>
@@ -62,125 +63,288 @@
     </div>
   </div>
 
-  <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyBdteto-20fg-Ybr4t5E9i5n6ADJLp1RCU",
-      authDomain: "luielei-2026.firebaseapp.com",
-      databaseURL: "https://luielei-2026-default-rtdb.europe-west1.firebasedatabase.app",
-      projectId: "luielei-2026",
-      storageBucket: "luielei-2026.appspot.com",
-      messagingSenderId: "761026742166",
-      appId: "1:761026742166:web:00f044e9e7cee4392a7fb7"
-    };
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyBdteto-20fg-Ybr4t5E9i5n6ADJLp1RCU",
+    authDomain: "luielei-2026.firebaseapp.com",
+    databaseURL: "https://luielei-2026-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "luielei-2026",
+    storageBucket: "luielei-2026.appspot.com",
+    messagingSenderId: "761026742166",
+    appId: "1:761026742166:web:00f044e9e7cee4392a7fb7"
+  };
 
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
-    const auth = firebase.auth();
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+  const auth = firebase.auth();
 
-    // LOGIN
-    function login() {
-      const email = document.getElementById("email").value;
-      const password = document.getElementById("password").value;
-      auth.signInWithEmailAndPassword(email, password)
-        .then(() => {
-          document.getElementById("loginForm").style.display = "none";
-          document.getElementById("adminContent").style.display = "block";
-          caricaPartite();
-        })
-        .catch(error => {
-          document.getElementById("loginError").innerText = "Credenziali non valide.";
-        });
-    }
+  function login() {
+    const email = document.getElementById("email").value;
+    const password = document.getElementById("password").value;
 
-    function logout() {
-      auth.signOut().then(() => location.reload());
-    }
-
-    auth.onAuthStateChanged(user => {
-      if (user) {
+    auth.signInWithEmailAndPassword(email, password)
+      .then(() => {
         document.getElementById("loginForm").style.display = "none";
         document.getElementById("adminContent").style.display = "block";
-        caricaPartite();
-      } else {
-        document.getElementById("loginForm").style.display = "block";
-        document.getElementById("adminContent").style.display = "none";
+        caricaContenuto();
+      })
+      .catch(() => {
+        document.getElementById("loginError").innerText = "Credenziali non valide.";
+      });
+  }
+
+  function logout() {
+    auth.signOut().then(() => location.reload());
+  }
+
+  auth.onAuthStateChanged(user => {
+    if (user) {
+      document.getElementById("loginForm").style.display = "none";
+      document.getElementById("adminContent").style.display = "block";
+      caricaContenuto();
+    } else {
+      document.getElementById("loginForm").style.display = "block";
+      document.getElementById("adminContent").style.display = "none";
+    }
+  });
+
+  function caricaContenuto() {
+    const sezione = document.getElementById("sezione").value;
+    aggiornaUISezione(sezione);
+
+    if (sezione === "gironi") {
+      db.ref("gironi").once("value", snapshot => {
+        mostraTabellaGironi(snapshot.val() || {});
+      });
+      return;
+    }
+
+    db.ref(sezione).once("value", snapshot => {
+      mostraTabellaPartite(snapshot.val() || {}, sezione);
+    });
+  }
+
+  function aggiornaUISezione(sezione) {
+    const label = document.getElementById("labelFiltro");
+    const input = document.getElementById("filtroTesto");
+
+    if (sezione === "gironi") {
+      label.innerText = "Filtra gironi o squadre:";
+      input.placeholder = "Es. A, A1, Squadra A1";
+    } else if (sezione === "programma") {
+      label.innerText = "Filtra partite:";
+      input.placeholder = "Es. A1, A, 2026-04-04, Campo A";
+    } else {
+      label.innerText = "Filtra finali:";
+      input.placeholder = "Es. Ottavi, G, 2026-04-06";
+    }
+  }
+
+  function resetRisultati() {
+    const sezione = document.getElementById("sezione").value;
+
+    if (sezione === "gironi") {
+      alert("Nei gironi non ci sono risultati da resettare.");
+      return;
+    }
+
+    if (!confirm(`Sicuro di voler svuotare tutti i risultati della sezione "${sezione}"?`)) return;
+
+    db.ref(sezione).once("value", snapshot => {
+      const dati = snapshot.val() || {};
+      const updates = {};
+
+      Object.keys(dati).forEach(id => {
+        updates[`${id}/RISULTATO`] = "";
+      });
+
+      db.ref(sezione).update(updates)
+        .then(() => {
+          alert("Tutti i risultati svuotati.");
+          caricaContenuto();
+        });
+    });
+  }
+
+  function salvaRisultato(sezione, id) {
+    const risultato = document.getElementById(`risultato-${sezione}-${id}`).value.trim();
+
+    if (!/^\d+-\d+$/.test(risultato) && risultato !== "") {
+      alert("Inserisci un risultato valido nel formato X-Y");
+      return;
+    }
+
+    db.ref(`${sezione}/${id}/RISULTATO`).set(risultato)
+      .then(() => caricaContenuto());
+  }
+  window.salvaRisultato = salvaRisultato;
+
+  function svuotaRisultato(sezione, id) {
+    if (!confirm("Vuoi davvero cancellare il risultato?")) return;
+
+    db.ref(`${sezione}/${id}/RISULTATO`).set("")
+      .then(() => caricaContenuto());
+  }
+  window.svuotaRisultato = svuotaRisultato;
+
+  function salvaSquadra(girone, posizione) {
+    const input = document.getElementById(`nome-${girone}-${posizione}`);
+    const nome = input.value.trim();
+
+    if (!nome) {
+      alert("Inserisci un nome squadra.");
+      input.focus();
+      return;
+    }
+
+    db.ref(`gironi/${girone}/${posizione}/nome`).set(nome)
+      .then(() => {
+        input.style.backgroundColor = "#d4edda";
+        setTimeout(() => input.style.backgroundColor = "", 700);
+      });
+  }
+  window.salvaSquadra = salvaSquadra;
+
+  function mostraTabellaGironi(gironi) {
+    const filtro = document.getElementById("filtroTesto").value.toLowerCase().trim();
+    const lettere = ["A", "B", "C", "D", "E", "F", "G"];
+
+    let html = "";
+
+    lettere.forEach(girone => {
+      const squadre = gironi[girone] || {};
+      const righe = [];
+
+      for (let posizione = 1; posizione <= 5; posizione++) {
+        const nome = squadre[posizione]?.nome || "";
+        const codice = `${girone}${posizione}`;
+        const testo = `${girone} ${codice} ${nome}`.toLowerCase();
+
+        if (filtro && !testo.includes(filtro)) continue;
+
+        righe.push(`
+          <tr>
+            <td>${codice}</td>
+            <td>
+              <input type="text" id="nome-${girone}-${posizione}" value="${escapeHtml(nome)}" style="width: 95%; text-align:left;" />
+            </td>
+            <td>
+              <button onclick="salvaSquadra('${girone}', '${posizione}')">Salva</button>
+            </td>
+          </tr>
+        `);
       }
+
+      if (righe.length === 0) return;
+
+      html += `
+        <h2>Girone ${girone}</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Codice</th>
+              <th>Nome squadra</th>
+              <th>Azione</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${righe.join("")}
+          </tbody>
+        </table>
+      `;
     });
 
-    function resetRisultati() {
-      const sezione = document.getElementById("sezione").value;
-      if (!confirm(`Sicuro di voler svuotare tutti i risultati della sezione "${sezione}"?`)) return;
-
-      db.ref(sezione).once("value", snapshot => {
-        const updates = {};
-        Object.keys(snapshot.val()).forEach(id => {
-          updates[`${id}/RISULTATO`] = "";
-        });
-        db.ref(sezione).update(updates)
-          .then(() => { alert("Tutti i risultati svuotati."); caricaPartite(); });
-      });
+    if (!html) {
+      html = `<p><em>Nessun risultato trovato per il filtro inserito.</em></p>`;
     }
 
-    function salvaRisultato(sezione, id) {
-      const risultato = document.getElementById(`risultato-${sezione}-${id}`).value.trim();
-      if (!/^\d+-\d+$/.test(risultato) && risultato !== "") {
-        alert("Inserisci un risultato valido nel formato 'X-Y'");
-        return;
-      }
-      db.ref(`${sezione}/${id}/RISULTATO`).set(risultato).then(caricaPartite);
-    }
-    window.salvaRisultato = salvaRisultato;
+    document.getElementById("tabellaPartite").innerHTML = html;
+  }
 
-    function svuotaRisultato(sezione, id) {
-      if (confirm("Vuoi davvero cancellare il risultato?")) {
-        db.ref(`${sezione}/${id}/RISULTATO`).set("").then(caricaPartite);
-      }
-    }
-    window.svuotaRisultato = svuotaRisultato;
+  function mostraTabellaPartite(partite, sezione) {
+    const filtro = document.getElementById("filtroTesto").value.toLowerCase().trim();
 
-    function caricaPartite() {
-      const sezione = document.getElementById("sezione").value;
-      db.ref(sezione).once("value", snapshot => {
-        mostraTabella(snapshot.val(), sezione);
-      });
-    }
+    const entries = Object.entries(partite)
+      .filter(([, p]) => {
+        const testo = [
+          p["FASE FINALE"] || "",
+          p.DATA || "",
+          p.ORA || "",
+          p.CAMPO || "",
+          p.GIRONE || "",
+          p.TURNO || "",
+          p.SQUADRA1 || "",
+          p.SQUADRA2 || "",
+          p.RISULTATO || ""
+        ].join(" ").toLowerCase();
 
-    function mostraTabella(partite, sezione) {
-      const filtro = document.getElementById("filtroTesto").value.toLowerCase();
-      const entries = Object.entries(partite).filter(([, p]) => {
-        const testo = `${p.DATA} ${p.ORA} ${p.CAMPO} ${p.GIRONE || ""} ${p.SQUADRA1} ${p.SQUADRA2}`.toLowerCase();
         return testo.includes(filtro);
-      }).sort(([, a], [, b]) => {
-        const dtA = new Date(`${a.DATA}T${a.ORA}`);
-        const dtB = new Date(`${b.DATA}T${b.ORA}`);
-        return dtA - dtB || a.CAMPO.localeCompare(b.CAMPO);
+      })
+      .sort(([, a], [, b]) => {
+        const dtA = new Date(`${a.DATA || ""}T${a.ORA || "00:00"}`);
+        const dtB = new Date(`${b.DATA || ""}T${b.ORA || "00:00"}`);
+        return dtA - dtB || String(a.CAMPO || "").localeCompare(String(b.CAMPO || ""));
       });
 
-      let html = `<table><thead><tr>`;
-      html += sezione === "programma"
-        ? `<th>Data</th><th>Ora</th><th>Campo</th><th>Girone</th><th>Squadra 1</th><th>Risultato</th><th>Squadra 2</th><th>Azioni</th>`
-        : `<th>Fase</th><th>Data</th><th>Ora</th><th>Campo</th><th>Turno</th><th>Squadra 1</th><th>Risultato</th><th>Squadra 2</th><th>Azioni</th>`;
-      html += `</tr></thead><tbody>`;
+    let html = `<table><thead><tr>`;
 
-      for (const [id, p] of entries) {
-        html += `<tr>`;
-        if (sezione === "programma") {
-          html += `<td>${p.DATA}</td><td>${p.ORA}</td><td>${p.CAMPO}</td><td>${p.GIRONE}</td><td>${p.SQUADRA1}</td>`;
-        } else {
-          html += `<td>${p["FASE FINALE"]}</td><td>${p.DATA}</td><td>${p.ORA}</td><td>${p.CAMPO}</td><td>${p.TURNO}</td><td>${p.SQUADRA1}</td>`;
-        }
-        html += `<td><input type="text" id="risultato-${sezione}-${id}" value="${p.RISULTATO || ""}" /></td>`;
-        html += `<td>${p.SQUADRA2}</td>`;
-        html += `<td class="action-buttons">
-                  <button onclick="salvaRisultato('${sezione}', '${id}')">Salva</button>
-                  <button onclick="svuotaRisultato('${sezione}', '${id}')">Svuota</button>
-                 </td>`;
-        html += `</tr>`;
+    html += sezione === "programma"
+      ? `<th>Data</th><th>Ora</th><th>Campo</th><th>Girone</th><th>Squadra 1</th><th>Risultato</th><th>Squadra 2</th><th>Azioni</th>`
+      : `<th>Fase</th><th>Data</th><th>Ora</th><th>Campo</th><th>Turno</th><th>Squadra 1</th><th>Risultato</th><th>Squadra 2</th><th>Azioni</th>`;
+
+    html += `</tr></thead><tbody>`;
+
+    for (const [id, p] of entries) {
+      html += `<tr>`;
+
+      if (sezione === "programma") {
+        html += `
+          <td>${escapeHtml(p.DATA || "")}</td>
+          <td>${escapeHtml(p.ORA || "")}</td>
+          <td>${escapeHtml(p.CAMPO || "")}</td>
+          <td>${escapeHtml(p.GIRONE || "")}</td>
+          <td>${escapeHtml(p.SQUADRA1 || "")}</td>
+        `;
+      } else {
+        html += `
+          <td>${escapeHtml(p["FASE FINALE"] || "")}</td>
+          <td>${escapeHtml(p.DATA || "")}</td>
+          <td>${escapeHtml(p.ORA || "")}</td>
+          <td>${escapeHtml(p.CAMPO || "")}</td>
+          <td>${escapeHtml(p.TURNO || "")}</td>
+          <td>${escapeHtml(p.SQUADRA1 || "")}</td>
+        `;
       }
 
-      html += `</tbody></table>`;
-      document.getElementById("tabellaPartite").innerHTML = html;
+      html += `
+        <td><input type="text" id="risultato-${sezione}-${id}" value="${escapeHtml(p.RISULTATO || "")}" /></td>
+        <td>${escapeHtml(p.SQUADRA2 || "")}</td>
+        <td class="action-buttons">
+          <button onclick="salvaRisultato('${sezione}', '${id}')">Salva</button>
+          <button onclick="svuotaRisultato('${sezione}', '${id}')">Svuota</button>
+        </td>
+      `;
+
+      html += `</tr>`;
     }
-  </script>
+
+    html += `</tbody></table>`;
+
+    if (entries.length === 0) {
+      html = `<p><em>Nessun risultato trovato per il filtro inserito.</em></p>`;
+    }
+
+    document.getElementById("tabellaPartite").innerHTML = html;
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+</script>
 </body>
 </html>
