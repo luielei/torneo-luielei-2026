@@ -77,6 +77,7 @@
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
   const auth = firebase.auth();
+  let gironiNomi = {};
 
   function login() {
     const email = document.getElementById("email").value;
@@ -108,10 +109,38 @@
     }
   });
 
-  function caricaContenuto() {
-    const sezione = document.getElementById("sezione").value;
-    aggiornaUISezione(sezione);
+function caricaGironiNomi() {
+  return db.ref("gironi").once("value").then(snapshot => {
+    gironiNomi = snapshot.val() || {};
+  });
+}
 
+function risolviCodiceSquadra(codice) {
+  const pulito = String(codice || "").trim();
+  const match = pulito.match(/^([A-G])([1-5])$/);
+
+  if (!match) return "";
+  const girone = match[1];
+  const posizione = match[2];
+
+  return gironiNomi?.[girone]?.[posizione]?.nome || "";
+}
+
+function formattaSquadraAdmin(codice) {
+  const pulito = String(codice || "").trim();
+  const nome = risolviCodiceSquadra(pulito);
+
+  if (!pulito) return "";
+  if (!nome) return pulito;
+
+  return `${pulito} — ${nome}`;
+}
+
+function caricaContenuto() {
+  const sezione = document.getElementById("sezione").value;
+  aggiornaUISezione(sezione);
+
+  caricaGironiNomi().then(() => {
     if (sezione === "gironi") {
       db.ref("gironi").once("value", snapshot => {
         mostraTabellaGironi(snapshot.val() || {});
@@ -122,7 +151,8 @@
     db.ref(sezione).once("value", snapshot => {
       mostraTabellaPartite(snapshot.val() || {}, sezione);
     });
-  }
+  });
+}
 
   function aggiornaUISezione(sezione) {
     const label = document.getElementById("labelFiltro");
@@ -261,81 +291,89 @@
     document.getElementById("tabellaPartite").innerHTML = html;
   }
 
-  function mostraTabellaPartite(partite, sezione) {
-    const filtro = document.getElementById("filtroTesto").value.toLowerCase().trim();
+function mostraTabellaPartite(partite, sezione) {
+  const filtro = document.getElementById("filtroTesto").value.toLowerCase().trim();
 
-    const entries = Object.entries(partite)
-      .filter(([, p]) => {
-        const testo = [
-          p["FASE FINALE"] || "",
-          p.DATA || "",
-          p.ORA || "",
-          p.CAMPO || "",
-          p.GIRONE || "",
-          p.TURNO || "",
-          p.SQUADRA1 || "",
-          p.SQUADRA2 || "",
-          p.RISULTATO || ""
-        ].join(" ").toLowerCase();
+  const entries = Object.entries(partite)
+    .filter(([, p]) => {
+      const squadra1Display = formattaSquadraAdmin(p.SQUADRA1 || "");
+      const squadra2Display = formattaSquadraAdmin(p.SQUADRA2 || "");
 
-        return testo.includes(filtro);
-      })
-      .sort(([, a], [, b]) => {
-        const dtA = new Date(`${a.DATA || ""}T${a.ORA || "00:00"}`);
-        const dtB = new Date(`${b.DATA || ""}T${b.ORA || "00:00"}`);
-        return dtA - dtB || String(a.CAMPO || "").localeCompare(String(b.CAMPO || ""));
-      });
+      const testo = [
+        p["FASE FINALE"] || "",
+        p.DATA || "",
+        p.ORA || "",
+        p.CAMPO || "",
+        p.GIRONE || "",
+        p.TURNO || "",
+        p.SQUADRA1 || "",
+        p.SQUADRA2 || "",
+        squadra1Display,
+        squadra2Display,
+        p.RISULTATO || ""
+      ].join(" ").toLowerCase();
 
-    let html = `<table><thead><tr>`;
+      return testo.includes(filtro);
+    })
+    .sort(([, a], [, b]) => {
+      const dtA = new Date(`${a.DATA || ""}T${a.ORA || "00:00"}`);
+      const dtB = new Date(`${b.DATA || ""}T${b.ORA || "00:00"}`);
+      return dtA - dtB || String(a.CAMPO || "").localeCompare(String(b.CAMPO || ""));
+    });
 
-    html += sezione === "programma"
-      ? `<th>Data</th><th>Ora</th><th>Campo</th><th>Girone</th><th>Squadra 1</th><th>Risultato</th><th>Squadra 2</th><th>Azioni</th>`
-      : `<th>Fase</th><th>Data</th><th>Ora</th><th>Campo</th><th>Turno</th><th>Squadra 1</th><th>Risultato</th><th>Squadra 2</th><th>Azioni</th>`;
+  let html = `<table><thead><tr>`;
 
-    html += `</tr></thead><tbody>`;
+  html += sezione === "programma"
+    ? `<th>Data</th><th>Ora</th><th>Campo</th><th>Girone</th><th>Squadra 1</th><th>Risultato</th><th>Squadra 2</th><th>Azioni</th>`
+    : `<th>Fase</th><th>Data</th><th>Ora</th><th>Campo</th><th>Turno</th><th>Squadra 1</th><th>Risultato</th><th>Squadra 2</th><th>Azioni</th>`;
 
-    for (const [id, p] of entries) {
-      html += `<tr>`;
+  html += `</tr></thead><tbody>`;
 
-      if (sezione === "programma") {
-        html += `
-          <td>${escapeHtml(p.DATA || "")}</td>
-          <td>${escapeHtml(p.ORA || "")}</td>
-          <td>${escapeHtml(p.CAMPO || "")}</td>
-          <td>${escapeHtml(p.GIRONE || "")}</td>
-          <td>${escapeHtml(p.SQUADRA1 || "")}</td>
-        `;
-      } else {
-        html += `
-          <td>${escapeHtml(p["FASE FINALE"] || "")}</td>
-          <td>${escapeHtml(p.DATA || "")}</td>
-          <td>${escapeHtml(p.ORA || "")}</td>
-          <td>${escapeHtml(p.CAMPO || "")}</td>
-          <td>${escapeHtml(p.TURNO || "")}</td>
-          <td>${escapeHtml(p.SQUADRA1 || "")}</td>
-        `;
-      }
+  for (const [id, p] of entries) {
+    const squadra1 = formattaSquadraAdmin(p.SQUADRA1 || "");
+    const squadra2 = formattaSquadraAdmin(p.SQUADRA2 || "");
 
+    html += `<tr>`;
+
+    if (sezione === "programma") {
       html += `
-        <td><input type="text" id="risultato-${sezione}-${id}" value="${escapeHtml(p.RISULTATO || "")}" /></td>
-        <td>${escapeHtml(p.SQUADRA2 || "")}</td>
-        <td class="action-buttons">
-          <button onclick="salvaRisultato('${sezione}', '${id}')">Salva</button>
-          <button onclick="svuotaRisultato('${sezione}', '${id}')">Svuota</button>
-        </td>
+        <td>${escapeHtml(p.DATA || "")}</td>
+        <td>${escapeHtml(p.ORA || "")}</td>
+        <td>${escapeHtml(p.CAMPO || "")}</td>
+        <td>${escapeHtml(p.GIRONE || "")}</td>
+        <td>${escapeHtml(squadra1)}</td>
       `;
-
-      html += `</tr>`;
+    } else {
+      html += `
+        <td>${escapeHtml(p["FASE FINALE"] || "")}</td>
+        <td>${escapeHtml(p.DATA || "")}</td>
+        <td>${escapeHtml(p.ORA || "")}</td>
+        <td>${escapeHtml(p.CAMPO || "")}</td>
+        <td>${escapeHtml(p.TURNO || "")}</td>
+        <td>${escapeHtml(squadra1)}</td>
+      `;
     }
 
-    html += `</tbody></table>`;
+    html += `
+      <td><input type="text" id="risultato-${sezione}-${id}" value="${escapeHtml(p.RISULTATO || "")}" /></td>
+      <td>${escapeHtml(squadra2)}</td>
+      <td class="action-buttons">
+        <button onclick="salvaRisultato('${sezione}', '${id}')">Salva</button>
+        <button onclick="svuotaRisultato('${sezione}', '${id}')">Svuota</button>
+      </td>
+    `;
 
-    if (entries.length === 0) {
-      html = `<p><em>Nessun risultato trovato per il filtro inserito.</em></p>`;
-    }
-
-    document.getElementById("tabellaPartite").innerHTML = html;
+    html += `</tr>`;
   }
+
+  html += `</tbody></table>`;
+
+  if (entries.length === 0) {
+    html = `<p><em>Nessun risultato trovato per il filtro inserito.</em></p>`;
+  }
+
+  document.getElementById("tabellaPartite").innerHTML = html;
+}
 
   function escapeHtml(value) {
     return String(value)
