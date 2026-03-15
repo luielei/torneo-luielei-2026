@@ -78,6 +78,8 @@
   const db = firebase.database();
   const auth = firebase.auth();
   let gironiNomi = {};
+  let programmaData = {};
+  let finaliData = {};
 
   function login() {
     const email = document.getElementById("email").value;
@@ -136,6 +138,154 @@ function formattaSquadraAdmin(codice) {
   return `${pulito} — ${nome}`;
 }
 
+function calcolaClassificheAdmin(programma) {
+  const classifiche = {};
+  const squadrePerGirone = {};
+
+  Object.values(programma || {}).forEach(p => {
+    const girone = String(p.GIRONE || "").trim();
+    const squadra1 = String(p.SQUADRA1 || "").trim();
+    const squadra2 = String(p.SQUADRA2 || "").trim();
+
+    if (!girone || !squadra1 || !squadra2) return;
+
+    if (!squadrePerGirone[girone]) squadrePerGirone[girone] = new Set();
+    squadrePerGirone[girone].add(squadra1);
+    squadrePerGirone[girone].add(squadra2);
+  });
+
+  Object.entries(squadrePerGirone).forEach(([girone, setSquadre]) => {
+    classifiche[girone] = {};
+    setSquadre.forEach(codice => {
+      classifiche[girone][codice] = { PG: 0, GF: 0, GS: 0, P: 0 };
+    });
+  });
+
+  Object.values(programma || {}).forEach(p => {
+    const girone = String(p.GIRONE || "").trim();
+    const squadra1 = String(p.SQUADRA1 || "").trim();
+    const squadra2 = String(p.SQUADRA2 || "").trim();
+    const risultato = String(p.RISULTATO || "").trim();
+
+    if (!/^\d+-\d+$/.test(risultato)) return;
+    if (!classifiche[girone]?.[squadra1] || !classifiche[girone]?.[squadra2]) return;
+
+    const [g1, g2] = risultato.split("-").map(Number);
+
+    classifiche[girone][squadra1].PG++;
+    classifiche[girone][squadra2].PG++;
+
+    classifiche[girone][squadra1].GF += g1;
+    classifiche[girone][squadra1].GS += g2;
+    classifiche[girone][squadra2].GF += g2;
+    classifiche[girone][squadra2].GS += g1;
+
+    if (g1 > g2) classifiche[girone][squadra1].P += 3;
+    else if (g2 > g1) classifiche[girone][squadra2].P += 3;
+    else {
+      classifiche[girone][squadra1].P += 1;
+      classifiche[girone][squadra2].P += 1;
+    }
+  });
+
+  return classifiche;
+}
+
+function costruisciMappaFinaliAdmin(programma, finali) {
+  const classifiche = calcolaClassificheAdmin(programma);
+
+  const qualificati = {};
+  const vincitori = {};
+  const perdenti = {};
+
+  const gironiCompleti = Object.keys(classifiche).filter(g =>
+    Object.values(classifiche[g]).every(s => s.PG === 4)
+  );
+
+  gironiCompleti.forEach(g => {
+    const squadre = Object.entries(classifiche[g])
+      .map(([codice, stats]) => ({
+        codice,
+        P: stats.P,
+        DR: stats.GF - stats.GS,
+        GF: stats.GF
+      }))
+      .sort((a, b) => b.P - a.P || b.DR - a.DR || b.GF - a.GF);
+
+    if (squadre[0]) qualificati[`1${g}`] = squadre[0].codice;
+    if (squadre[1]) qualificati[`2${g}`] = squadre[1].codice;
+    if (squadre[2]) qualificati[`3${g}`] = squadre[2].codice;
+  });
+
+  const terze = gironiCompleti
+    .map(g => {
+      const squadre = Object.entries(classifiche[g])
+        .map(([codice, stats]) => ({
+          girone: g,
+          codice,
+          P: stats.P,
+          DR: stats.GF - stats.GS,
+          GF: stats.GF
+        }))
+        .sort((a, b) => b.P - a.P || b.DR - a.DR || b.GF - a.GF);
+
+      return squadre[2];
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.P - a.P || b.DR - a.DR || b.GF - a.GF);
+
+  if (gironiCompleti.length === 7) {
+    if (terze[0]) qualificati["3M1"] = terze[0].codice;
+    if (terze[1]) qualificati["3M2"] = terze[1].codice;
+  }
+
+  Object.values(finali || {})
+    .sort((a, b) => {
+      const dtA = new Date(`${a.DATA || ""}T${a.ORA || "00:00"}`);
+      const dtB = new Date(`${b.DATA || ""}T${b.ORA || "00:00"}`);
+      return dtA - dtB || String(a.CAMPO || "").localeCompare(String(b.CAMPO || ""));
+    })
+    .forEach(f => {
+      const turno = String(f.TURNO || "").trim();
+      const cod1 = String(f.SQUADRA1 || "").trim();
+      const cod2 = String(f.SQUADRA2 || "").trim();
+      const risultato = String(f.RISULTATO || "").trim();
+
+      const squadra1Cod = qualificati[cod1] || vincitori[cod1] || perdenti[cod1] || cod1;
+      const squadra2Cod = qualificati[cod2] || vincitori[cod2] || perdenti[cod2] || cod2;
+
+      if (/^\d+-\d+$/.test(risultato)) {
+        const [g1, g2] = risultato.split("-").map(Number);
+
+        if (g1 > g2) {
+          vincitori[`VINC_${turno}`] = squadra1Cod;
+          perdenti[`PERD_${turno}`] = squadra2Cod;
+        } else if (g2 > g1) {
+          vincitori[`VINC_${turno}`] = squadra2Cod;
+          perdenti[`PERD_${turno}`] = squadra1Cod;
+        }
+      }
+    });
+
+  return { qualificati, vincitori, perdenti };
+}
+
+function formattaSquadraFinaleAdmin(codice, mappaFinali) {
+  const pulito = String(codice || "").trim();
+  if (!pulito) return "";
+
+  const codiceRisolto =
+    mappaFinali.qualificati[pulito] ||
+    mappaFinali.vincitori[pulito] ||
+    mappaFinali.perdenti[pulito] ||
+    pulito;
+
+  const nome = risolviCodiceSquadra(codiceRisolto);
+
+  if (!nome) return pulito;
+  return `${pulito} — ${nome}`;
+}
+
 function caricaContenuto() {
   const sezione = document.getElementById("sezione").value;
   aggiornaUISezione(sezione);
@@ -148,8 +298,21 @@ function caricaContenuto() {
       return;
     }
 
-    db.ref(sezione).once("value", snapshot => {
-      mostraTabellaPartite(snapshot.val() || {}, sezione);
+    if (sezione === "programma") {
+      db.ref("programma").once("value", snapshot => {
+        programmaData = snapshot.val() || {};
+        mostraTabellaPartite(programmaData, "programma");
+      });
+      return;
+    }
+
+    Promise.all([
+      db.ref("programma").once("value"),
+      db.ref("finali").once("value")
+    ]).then(([snapProgramma, snapFinali]) => {
+      programmaData = snapProgramma.val() || {};
+      finaliData = snapFinali.val() || {};
+      mostraTabellaPartite(finaliData, "finali");
     });
   });
 }
@@ -293,11 +456,19 @@ function caricaContenuto() {
 
 function mostraTabellaPartite(partite, sezione) {
   const filtro = document.getElementById("filtroTesto").value.toLowerCase().trim();
+  const mappaFinali = sezione === "finali"
+    ? costruisciMappaFinaliAdmin(programmaData, partite)
+    : null;
 
   const entries = Object.entries(partite)
     .filter(([, p]) => {
-      const squadra1Display = formattaSquadraAdmin(p.SQUADRA1 || "");
-      const squadra2Display = formattaSquadraAdmin(p.SQUADRA2 || "");
+      const squadra1Display = sezione === "finali"
+        ? formattaSquadraFinaleAdmin(p.SQUADRA1 || "", mappaFinali)
+        : formattaSquadraAdmin(p.SQUADRA1 || "");
+
+      const squadra2Display = sezione === "finali"
+        ? formattaSquadraFinaleAdmin(p.SQUADRA2 || "", mappaFinali)
+        : formattaSquadraAdmin(p.SQUADRA2 || "");
 
       const testo = [
         p["FASE FINALE"] || "",
@@ -330,8 +501,13 @@ function mostraTabellaPartite(partite, sezione) {
   html += `</tr></thead><tbody>`;
 
   for (const [id, p] of entries) {
-    const squadra1 = formattaSquadraAdmin(p.SQUADRA1 || "");
-    const squadra2 = formattaSquadraAdmin(p.SQUADRA2 || "");
+    const squadra1 = sezione === "finali"
+      ? formattaSquadraFinaleAdmin(p.SQUADRA1 || "", mappaFinali)
+      : formattaSquadraAdmin(p.SQUADRA1 || "");
+
+    const squadra2 = sezione === "finali"
+      ? formattaSquadraFinaleAdmin(p.SQUADRA2 || "", mappaFinali)
+      : formattaSquadraAdmin(p.SQUADRA2 || "");
 
     html += `<tr>`;
 
@@ -374,15 +550,14 @@ function mostraTabellaPartite(partite, sezione) {
 
   document.getElementById("tabellaPartite").innerHTML = html;
 }
-
-  function escapeHtml(value) {
-    return String(value)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 </script>
 </body>
 </html>
